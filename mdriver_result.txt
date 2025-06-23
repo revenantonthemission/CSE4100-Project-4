@@ -1,0 +1,44 @@
+[20190328]::NAME: Joonhee Cho, Email Address: trivialife@sogang.ac.kr
+Using default tracefiles in ./tracefiles/
+Measuring performance with gettimeofday().
+
+Testing mm malloc
+Reading tracefile: amptjp-bal.rep
+Checking mm_malloc for correctness, efficiency, and performance.
+Reading tracefile: cccp-bal.rep
+Checking mm_malloc for correctness, efficiency, and performance.
+Reading tracefile: cp-decl-bal.rep
+Checking mm_malloc for correctness, efficiency, and performance.
+Reading tracefile: expr-bal.rep
+Checking mm_malloc for correctness, efficiency, and performance.
+Reading tracefile: coalescing-bal.rep
+Checking mm_malloc for correctness, efficiency, and performance.
+Reading tracefile: random-bal.rep
+Checking mm_malloc for correctness, efficiency, and performance.
+Reading tracefile: random2-bal.rep
+Checking mm_malloc for correctness, efficiency, and performance.
+Reading tracefile: binary-bal.rep
+Checking mm_malloc for correctness, efficiency, and performance.
+Reading tracefile: binary2-bal.rep
+Checking mm_malloc for correctness, efficiency, and performance.
+Reading tracefile: realloc-bal.rep
+Checking mm_malloc for correctness, efficiency, and performance.
+Reading tracefile: realloc2-bal.rep
+Checking mm_malloc for correctness, efficiency, and performance.
+
+Results for mm malloc:
+trace  valid  util     ops      secs  Kops
+ 0       yes   99%    5694  0.001683  3384
+ 1       yes   99%    5848  0.001449  4035
+ 2       yes   99%    6648  0.001438  4624
+ 3       yes   99%    5380  0.001102  4883
+ 4       yes   66%   14400  0.001998  7207
+ 5       yes   96%    4800  0.001611  2979
+ 6       yes   95%    4800  0.001653  2905
+ 7       yes   55%   12000  0.002676  4485
+ 8       yes   51%   24000  0.004483  5354
+ 9       yes   28%   14401  0.001896  7594
+10       yes   36%   14401  0.001257 11458
+Total          75%  112372  0.021245  5289
+
+Perf index = 45 (util) + 40 (thru) = 85/100

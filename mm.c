@@ -8,13 +8,6 @@
  * Free blocks are managed using a Red-Black Tree, ordered by block size.
  * This version is for 32-bit systems.
  *
- * *****************************************************************
- * <<< 주요 수정 사항 >>>
- * 1. rb_delete & rb_delete_fixup: Black Height 불일치 오류를 해결하기 위해
- * NULL 노드 처리 로직을 포함한 표준 R-B Tree 삭제 알고리즘으로 대폭 수정.
- * 삭제된 노드가 블랙일 경우, 대체 노드가 NULL이더라도 fixup을 수행하도록 변경.
- * 2. MIN_BLK_SIZE: 24바이트 (8바이트 정렬 준수)
- * *****************************************************************
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -32,17 +25,18 @@
  ********************************************************/
 team_t team = {
     /* Your student ID */
-    "20XXXXXX",
+    "20190328",
     /* Your full name*/
-    "Gildong Hong",
+    "Joonhee Cho",
     /* Your email address */
-    "example@sogang.ac.kr",
+    "trivialife@sogang.ac.kr",
 };
 
 /* Basic constants and macros for 32-bit */
 #define WSIZE       4       /* Word and header/footer size (bytes) */
 #define DSIZE       8       /* Double word size (bytes) */
 #define CHUNKSIZE   (1<<12) /* Extend heap by this amount (bytes) */
+
 /* Minimum block size must be 24 bytes (multiple of 8)
  * to hold header(4), footer(4), and 3 pointers(12) and maintain 8-byte alignment. */
 #define MIN_BLK_SIZE (6 * WSIZE) 
@@ -113,7 +107,13 @@ static void transplant(void *u, void *v);
 static void *tree_minimum(void *x);
 int mm_check(void);
 
-/* * mm_init - initialize the malloc package.
+/* Functions for mm_check. No changes needed here, but kept for completeness. */
+static int check_rb_properties_recursive(void* node, int black_count, int* path_black_height);
+static int validate_rb_tree(void);
+static int is_in_free_list_recursive(void *node, void *bp);
+
+/*
+ * mm_init - initialize the malloc package.
  */
 int mm_init(void)
 {
@@ -138,7 +138,8 @@ int mm_init(void)
     return 0;
 }
 
-/* * mm_malloc - Allocate a block.
+/*
+ * mm_malloc - Allocate a block.
  */
 void *mm_malloc(size_t size)
 {
@@ -195,11 +196,13 @@ void mm_free(void *bp)
 }
 
 /*
- * mm_realloc - Reallocate a block to a new size.
+ * mm_realloc - Reallocate a block to a new size. (Optimized)
  */
 void *mm_realloc(void *ptr, size_t size)
 {
-    if (ptr == NULL) return mm_malloc(size);
+    if (ptr == NULL) {
+        return mm_malloc(size);
+    }
     if (size == 0) {
         mm_free(ptr);
         return NULL;
@@ -208,58 +211,67 @@ void *mm_realloc(void *ptr, size_t size)
     size_t old_size = GET_SIZE(HDRP(ptr));
     size_t new_size;
 
-    /* Adjust new size */
-    if (size <= DSIZE + WSIZE*3) {
+    // Adjust size to include overhead and alignment
+    if (size <= DSIZE + 3 * WSIZE) {
         new_size = MIN_BLK_SIZE;
     } else {
         new_size = DSIZE * ((size + (DSIZE) + (DSIZE - 1)) / DSIZE);
     }
 
-    /* If new size is smaller or equal, we can just return the original pointer */
-    if (old_size >= new_size) {
+    // Case 1: New size is same as old size
+    if (new_size == old_size) {
         return ptr;
-    } 
-    
-    /* Check if we can expand into the next block */
-    void* next_block = NEXT_BLKP(ptr);
-    size_t next_alloc = GET_ALLOC(HDRP(next_block));
-    size_t next_size = GET_SIZE(HDRP(next_block));
+    }
 
-    /* If next block is free and large enough, merge them */
-    if (!next_alloc && (old_size + next_size) >= new_size) {
-        rb_delete(next_block); // Remove the next block from free tree
-        size_t total_size = old_size + next_size;
-        
-        // Split if necessary
-        if((total_size - new_size) >= MIN_BLK_SIZE) {
+    // Case 2: New size is smaller than old size (Shrinking)
+    if (new_size < old_size) {
+        if ((old_size - new_size) >= MIN_BLK_SIZE) {
+            // Split the block
             PUT(HDRP(ptr), PACK(new_size, 1, 1));
             PUT(FTRP(ptr), PACK(new_size, 1, 1));
-            void* remainder = NEXT_BLKP(ptr);
-            PUT(HDRP(remainder), PACK(total_size - new_size, 1, 0));
-            PUT(FTRP(remainder), PACK(total_size - new_size, 1, 0));
-            rb_insert(remainder);
+            void *remainder_bp = NEXT_BLKP(ptr);
+            PUT(HDRP(remainder_bp), PACK(old_size - new_size, 1, 0));
+            PUT(FTRP(remainder_bp), PACK(old_size - new_size, 1, 0));
+            coalesce(remainder_bp); // Add the new free block to the tree and merge if possible
+        }
+        // If remainder is too small to be a free block, do nothing.
+        return ptr;
+    }
+
+    // Case 3: New size is larger than old size (Expanding)
+    void *next_bp = NEXT_BLKP(ptr);
+    size_t next_alloc = GET_ALLOC(HDRP(next_bp));
+    size_t total_size = old_size + GET_SIZE(HDRP(next_bp));
+
+    // Subcase 3.1: Next block is free and large enough to merge
+    if (!next_alloc && total_size >= new_size) {
+        rb_delete(next_bp); // Remove next block from free tree
+        
+        if ((total_size - new_size) >= MIN_BLK_SIZE) {
+            // New allocated block and a new free block
+            PUT(HDRP(ptr), PACK(new_size, 1, 1));
+            PUT(FTRP(ptr), PACK(new_size, 1, 1));
+            void *remainder_bp = NEXT_BLKP(ptr);
+            PUT(HDRP(remainder_bp), PACK(total_size - new_size, 1, 0));
+            PUT(FTRP(remainder_bp), PACK(total_size - new_size, 1, 0));
+            coalesce(remainder_bp);
         } else {
+            // Use the entire merged block
             PUT(HDRP(ptr), PACK(total_size, 1, 1));
             PUT(FTRP(ptr), PACK(total_size, 1, 1));
         }
-        #ifdef DEBUG
-            mm_check();
-        #endif
         return ptr;
     }
-    
-    /* Fallback: allocate a new block and copy data */
+
+    // Subcase 3.2: Fallback - Malloc a new block
     void *new_ptr = mm_malloc(size);
-    if (new_ptr == NULL) return NULL;
-    
-    /* Copy data from old block to new block. */
-    size_t copy_size = old_size - DSIZE;
+    if (new_ptr == NULL) {
+        return NULL;
+    }
+    // Copy data from the old block to the new block
+    size_t copy_size = old_size - DSIZE; // payload size
     memcpy(new_ptr, ptr, copy_size);
-    mm_free(ptr);
-    
-    #ifdef DEBUG
-        mm_check();
-    #endif
+    mm_free(ptr); // Free the old block
     return new_ptr;
 }
 
@@ -332,8 +344,12 @@ static void *find_fit(size_t asize)
     void *current = rb_root;
     void *best_fit = NULL;
     while (current != NULL) {
-        if (GET_SIZE(HDRP(current)) >= asize) {
+        size_t current_size = GET_SIZE(HDRP(current));
+        if (current_size >= asize) {
             best_fit = current;
+            if (current_size == asize) { // Perfect fit!
+                return best_fit;
+            }
             current = LEFT_CHILD(current); // Try to find a smaller block
         } else {
             current = RIGHT_CHILD(current); // Need a larger block
@@ -547,7 +563,8 @@ static void rb_delete_fixup(void *x) {
             void *w = RIGHT_CHILD(parent_x); // w is sibling
             if (w == NULL) break; 
             
-            if (GET_COLOR(HDRP(w)) == 0) { // Case 1: sibling is RED
+            /* Case 1: sibling is RED */
+            if (GET_COLOR(HDRP(w)) == 0) {
                 SET_BLACK(w);
                 SET_RED(parent_x);
                 rotate_left(parent_x);
@@ -555,19 +572,21 @@ static void rb_delete_fixup(void *x) {
             }
             if (w == NULL) break;
 
+            /* Case 2: sibling's children are both BLACK */
             if ((LEFT_CHILD(w) == NULL || GET_COLOR(HDRP(LEFT_CHILD(w))) == 1) &&
-                (RIGHT_CHILD(w) == NULL || GET_COLOR(HDRP(RIGHT_CHILD(w))) == 1)) { // Case 2: sibling's children are both BLACK
+                (RIGHT_CHILD(w) == NULL || GET_COLOR(HDRP(RIGHT_CHILD(w))) == 1)) {
                 SET_RED(w);
                 x = parent_x;
             } else {
-                if (RIGHT_CHILD(w) == NULL || GET_COLOR(HDRP(RIGHT_CHILD(w))) == 1) { // Case 3: sibling's right child is BLACK
+                if (RIGHT_CHILD(w) == NULL || GET_COLOR(HDRP(RIGHT_CHILD(w))) == 1) { 
+                    /* Case 3: sibling's right child is BLACK */
                     if (LEFT_CHILD(w) != NULL) SET_BLACK(LEFT_CHILD(w));
                     SET_RED(w);
                     rotate_right(w);
                     w = RIGHT_CHILD(parent_x);
                 }
                 if (w == NULL) break;
-                // Case 4: sibling's right child is RED
+                /* Case 4: sibling's right child is RED */
                 SET_COLOR(w, GET_COLOR(HDRP(parent_x)));
                 SET_BLACK(parent_x);
                 if (RIGHT_CHILD(w) != NULL) SET_BLACK(RIGHT_CHILD(w));
@@ -613,10 +632,6 @@ static void rb_delete_fixup(void *x) {
 /************************************************
  * Heap Checker (For Debugging)
  ************************************************/
-// Functions for mm_check. No changes needed here, but kept for completeness.
-static int check_rb_properties_recursive(void* node, int black_count, int* path_black_height);
-static int validate_rb_tree(void);
-static int is_in_free_list_recursive(void *node, void *bp);
 
 int mm_check(void) {
     void *bp;
