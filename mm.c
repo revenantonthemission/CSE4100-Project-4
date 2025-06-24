@@ -8,9 +8,29 @@
  * Free blocks contain pointers to their predecessor and successor in a
  * segregated free list.
  * 
- * ============================================================================
- * | Header (size + alloc + realloc tag) | Payload | Footer (size + alloc) |
- * ============================================================================
+ * [Allocated Block]
+ * +------------------------------------------+
+ * | Header (size | prev_alloc | alloc | tag) | 4 bytes
+ * +------------------------------------------+
+ * |                                          |
+ * |                 Payload                  |
+ * |                                          |
+ * +------------------------------------------+
+ * | Footer (size | prev_alloc | alloc)       | 4 bytes 
+ * +------------------------------------------+
+ *
+ * [Free Block]
+ * +--------------------------------------------+
+ * | Header (size | prev_alloc | alloc=0 | tag) | 4 bytes
+ * +--------------------------------------------+
+ * | SUCC (Pointer to next free block)          | 4 bytes
+ * +--------------------------------------------+
+ * | PRED (Pointer to previous free block)      | 4 bytes
+ * +--------------------------------------------+
+ * |              Payload(unused)               | 4 bytes
+ * +--------------------------------------------+
+ * | Footer (size | prev_alloc | alloc=0)       | 4 bytes
+ * +--------------------------------------------+
  *
  * [Free List Management]
  * Free blocks are managed using a segregated free list structure, where each
@@ -148,7 +168,7 @@ static void *extend_heap(size_t size) {
 
     PUT_NO_REALLOC(HDRP(ptr), PACK(asize, 0));          /* Set header */
     PUT_NO_REALLOC(FTRP(ptr), PACK(asize, 0));          /* Set footer */
-    PUT_NO_REALLOC(HDRP(NEXT_BLKP(ptr)), PACK(0, 1));   /* Set next block header */
+    PUT_NO_REALLOC(HDRP(NEXT_BLKP(ptr)), PACK(0, 1));   /* Set epilogue header */
 
     /* Insert the new free block into the segregated list */
     insert_node(ptr, asize);
